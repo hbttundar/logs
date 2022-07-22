@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+
+# Regular Colors
+BLACK='\033[0;30m'  # Black
+RED='\033[0;31m'    # Red
+GREEN='\033[0;32m'  # Green
+YELLOW='\033[0;33m' # Yellow
+BLUE='\033[0;34m'   # Blue
+PURPLE='\033[0;35m' # Purple
+CYAN='\033[0;36m'   # Cyan
+WHITE='\033[0;37m'  # White
+NC='\033[0m'
+
+# Define environment variables...
+export APP_SERVICE="${APP_SERVICE:-"web"}"
+export DB_SERVICE="${DB_SERVICE:-"database"}"
+export COMPOSER_SERVICE="${APP_SERVICE:-"composer"}"
+export REDIS_SERVICE="${REDIS_SERVICE:-"redis"}"
+export APP_PORT="${APP_PORT:-80}"
+export DB_USER="${DB_USER:-"root"}"
+export DB_PASSWORD="${DB_SECRET:-"root"}"
+export DB_NAME="${DB_NAME:-"shipment"}"
+export DB_PORT="${DB_PORT:-3306}"
+export WWWUSER="${WWWUSER:-$(id -u)}"
+export WWWGROUP="${WWWGROUP:-$(id -g)}"
+CURRENT_DIR=$(pwd)
+LON=/usr/local/bin/lon
+PROJECT_ROOT="${CURRENT_DIR}"
+VENDOR_ROOT="${CURRENT_DIR}"/vendor/
+VAR_ROOT="${CURRENT_DIR}"/var/
+
+. "${PROJECT_ROOT}"/docker/web/scripts/functions/functions.sh
+
+declare -a CUSTOM_F_COLOR=()
+declare -a CUSTOM_B_COLOR=()
+function SET_COLORS() {
+  iter=16
+  while [ $iter -lt 52 ]; do
+    second=$(($iter + 36))
+    third=$(($second + 36))
+    four=$(($third + 36))
+    five=$(($four + 36))
+    six=$(($five + 36))
+    seven=$(($six + 36))
+    if [ $seven -gt 250 ]; then seven=$(($seven - 251)); fi
+    CUSTOM_F_COLOR[$iter]="\033[38;5;${iter}m"
+    CUSTOM_B_COLOR[$iter]="\033[48;5;${iter}m"
+    CUSTOM_F_COLOR[$second]="\033[38;5;${second}m"
+    CUSTOM_B_COLOR[$second]="\033[48;5;${second}m"
+    CUSTOM_F_COLOR[$third]="\033[38;5;${third}m"
+    CUSTOM_B_COLOR[$third]="\033[48;5;${third}m"
+    CUSTOM_F_COLOR[$four]="\033[38;5;${four}m"
+    CUSTOM_B_COLOR[$four]="\033[48;5;${four}m"
+    CUSTOM_F_COLOR[$five]="\033[38;5;${five}m"
+    CUSTOM_B_COLOR[$five]="\033[48;5;${five}m"
+    CUSTOM_F_COLOR[$six]="\033[38;5;${six}m"
+    CUSTOM_B_COLOR[$six]="\033[48;5;${six}m"
+    CUSTOM_F_COLOR[$seven]="\033[38;5;${seven}m"
+    CUSTOM_B_COLOR[$seven]="\033[48;5;${seven}m"
+    iter=$(($iter + 1))
+  done
+}
+
+SET_COLORS
+
+# Verify operating system is supported...
+UNAMEOUT="$(uname -s)"
+case "${UNAMEOUT}" in
+Linux*) MACHINE=linux ;;
+Darwin*) MACHINE=mac ;;
+*) MACHINE="UNKNOWN" ;;
+esac
+
+if [ "$MACHINE" == "UNKNOWN" ]; then
+  echo -e "${YELLOW}Unsupported operating system [$(uname -s)]. docker supports macOS, Linux, and Windows (WSL2) that should be ubuntu." >&2
+  exit 1
+fi
+
+docker info >/dev/null 2>&1
+if ! docker info >/dev/null 2>&1; then
+  echo -e "${WHITE}Docker is not running.${NC}" >&2
+
+  exit 1
+fi
+COMPOSE="docker-compose"
+# Determine if any container exit and it means docker compose do something shipment is currently up...
+PSRESULT="$(docker-compose ps -q)"
+if [ -n "$PSRESULT" ]; then
+  EXEC="yes"
+else
+  EXEC="no"
+fi
+
+if [ $# -gt 0 ]; then
+  if [ "$1" == "initialize" ] || [ "$1" == "-init" ]; then
+    shift 1
+    compy_env_files
+    create_symlink_for_lon_bash
+    create_necessary_folder
+    set_permissions
+    run_docker_compose
+    setup_database
+  elif
+    [ "$1" == "help" ] || [ "$1" == "-h" ]
+  then
+    shift 1
+    print_help_menu
+  # stop old docker services
+  elif [ "$1" == "docker-stop" ] || [ "$1" == "-ds" ]; then
+    shift 1
+    docker_stop
+  # Proxy PHP commands to the "php" binary on the application container...
+  elif [ "$1" == "php" ]; then
+    shift 1
+    proxy_to_php "$@"
+    # Proxy test commands to the "web-service" container...
+  elif [ "$1" == "test" ]; then
+    shift 1
+    run_phpunit_test "$@"
+  # Proxy vendor binary commands on the application container...
+  elif [ "$1" == "bin" ]; then
+    shift 1
+    proxy_to_vendor_bin "$@"
+
+  # Proxy Composer commands to the "composer" binary on the application container...
+  elif [ "$1" == "composer" ]; then
+    shift 1
+    proxy_to_composer_service "$@"
+  # Initiate a MySQL CLI terminal session within the "db" container...
+  elif [ "$1" == "mysql" ] || [ "$1" == "mariadb" ]; then
+    shift 1
+    proxy_to_db_service
+  # Initiate a MySQL CLI terminal session within the "db" container...
+  elif [ "$1" == "mysql-bash" ] || [ "$1" == "mariadb-bash" ]; then
+    shift 1
+    proxy_to_db_service_bash
+  # Initiate a Bash shell within the application container...
+  elif [ "$1" == "shell" ] || [ "$1" == "bash" ]; then
+    shift 1
+    proxy_to_web_service_bash
+  # Initiate a symfony console ...
+  elif [ "$1" == "console" ] || [ "$1" == "-c" ]; then
+    shift 1
+    proxy_to_symfony_console "$@"
+  # Initiate a Redis CLI terminal session within the "redis" container...
+  elif [ "$1" == "redis" ]; then
+    shift 1
+    proxy_to_redis_cli
+  # Pass unknown commands to the "docker-compose" binary...
+  else
+    $COMPOSE "$@"
+  fi
+else
+  $COMPOSE ps
+fi
